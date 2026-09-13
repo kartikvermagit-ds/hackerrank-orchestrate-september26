@@ -33,10 +33,20 @@ class ContextBuilder:
         recurring_expenses = self.normalizer.extract_recurring_monthly_expenses(norm_events, request.request_date)
         recurring_cats = {r['category'] for r in recurring_expenses}
         # Fixed monthly categories
-        recurring_cats.update(['rent', 'utilities', 'debt_repayment', 'insurance', 'subscription', 'education', 'housing', 'cloud_storage', 'streaming', 'music_subscription', 'delivery_membership', 'gym'])
+        recurring_cats.update(['rent', 'utilities', 'debt_repayment', 'insurance', 'subscription', 'education', 'housing', 'cloud_storage', 'streaming', 'music_subscription', 'delivery_membership', 'gym', 'entertainment', 'healthcare', 'family_support', 'shopping'])
 
         # Calculate variable burn
         daily_var_burn = self.normalizer.calculate_variable_daily_burn(norm_events, request.request_date, recurring_cats)
+
+        # Calculate uncommitted living burn (groceries, transport, dining) for short-term pre-payday protection
+        req_dt = pd.to_datetime(request.request_date)
+        start_60 = req_dt - pd.Timedelta(days=60)
+        start_30 = req_dt - pd.Timedelta(days=30)
+        liv_60 = [e.amount for e in norm_events if e.status == 'settled' and e.direction == 'debit' and e.category in {'groceries', 'transport', 'dining'} and start_60 <= pd.to_datetime(e.event_date) < req_dt]
+        liv_30 = [e.amount for e in norm_events if e.status == 'settled' and e.direction == 'debit' and e.category in {'groceries', 'transport', 'dining'} and start_30 <= pd.to_datetime(e.event_date) < req_dt]
+        burn_uncommitted = max(sum(liv_60)/60.0 if liv_60 else 0.0, sum(liv_30)/30.0 if liv_30 else 0.0)
+        if burn_uncommitted == 0.0:
+            burn_uncommitted = daily_var_burn
 
         # Extract scheduled future debits
         scheduled_debits = {}
@@ -49,10 +59,11 @@ class ContextBuilder:
         # Extract salary details
         sal_amt, sal_day, next_sal_date = self.normalizer.get_salary_info(u_id, norm_events, request.request_date)
 
-        # Extract flexible candidate events (most recent settled event per flexible description/category)
+        # Extract active flexible candidate events from recent cycle (within 45 days of request_date)
         flex_map = {}
+        cutoff_dt = (pd.to_datetime(request.request_date) - pd.Timedelta(days=45)).strftime('%Y-%m-%d')
         for e in sorted(norm_events, key=lambda x: x.event_date):
-            if e.status == 'settled' and e.direction == 'debit' and e.event_date < request.request_date:
+            if e.status == 'settled' and e.direction == 'debit' and cutoff_dt <= e.event_date < request.request_date:
                 if e.flexibility in ['stoppable', 'reducible', 'reducible_or_stoppable']:
                     flex_map[e.description] = {
                         'event_id': e.event_id,
@@ -82,6 +93,7 @@ class ContextBuilder:
             stoppable_categories=set(profile.expense_categories_user_is_willing_to_stop),
             allowed_payment_methods=set(profile.payment_methods_user_will_consider),
             max_installment_months=profile.max_installment_months,
+            daily_uncommitted_burn=burn_uncommitted,
             flexible_events=flexible_events
         )
 

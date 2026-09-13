@@ -43,13 +43,13 @@ class EventNormalizer:
         'rent', 'utilities', 'debt_repayment', 'insurance', 'education', 
         'housing', 'subscription', 'cloud_storage', 'streaming', 
         'music_subscription', 'delivery_membership', 'gym', 'entertainment',
-        'healthcare', 'family_support'
+        'healthcare', 'family_support', 'shopping'
     }
 
-    LIVING_EXPENSE_CATEGORIES = {'groceries', 'transport', 'dining'}
+    LIVING_EXPENSE_CATEGORIES = {'groceries', 'transport'}
 
     REGULAR_SALARY_KEYWORDS = [
-        'payroll', 'salary', 'base salary', 'first-job', 'promotion arrears'
+        'payroll', 'salary', 'base salary', 'first-job'
     ]
 
     GIG_KEYWORDS = [
@@ -258,6 +258,9 @@ class EventNormalizer:
                 if e.category in self.FIXED_MONTHLY_CATEGORIES:
                     key = (e.category, e.description, e.flexibility)
                     groups.setdefault(key, []).append(e)
+                elif e.flexibility in ['reducible', 'stoppable', 'reducible_or_stoppable']:
+                    key = (e.category, f"recurring_{e.category}", e.flexibility)
+                    groups.setdefault(key, []).append(e)
 
         recurring = []
         for (cat, desc, flex), ev_list in groups.items():
@@ -267,18 +270,19 @@ class EventNormalizer:
                 intervals = [(dates[i] - dates[i-1]).days for i in range(1, len(dates))]
                 avg_interval = sum(intervals) / len(intervals) if intervals else 30
 
-                # Monthly cadence (20 to 35 days)
-                if 20 <= avg_interval <= 35 or len(ev_list) >= 2:
+                # Monthly / regular cadence (14 to 35 days)
+                if 14 <= avg_interval <= 35:
                     last_ev = sorted_evs[-1]
                     day_of_month = pd.to_datetime(last_ev.event_date).day
                     min_allowed = last_ev.minimum_allowed_amount
 
                     recurring.append({
                         'category': cat,
-                        'description': desc,
+                        'description': last_ev.description,
                         'flexibility': flex,
                         'amount': last_ev.amount,
                         'day_of_month': day_of_month,
+                        'cadence_days': round(avg_interval),
                         'last_date': last_ev.event_date,
                         'event_id': last_ev.event_id,
                         'minimum_allowed_amount': min_allowed
@@ -286,20 +290,32 @@ class EventNormalizer:
 
         return recurring
 
+    LIVING_EXPENSE_CATEGORIES = {'groceries', 'transport'}
+
     def calculate_variable_daily_burn(self, events: List[FinancialEvent], request_date: str,
                                       recurring_categories: Optional[Set[str]] = None) -> float:
         """Calculates daily burn rate for essential variable living categories (groceries, transport, dining)."""
         req_dt = pd.to_datetime(request_date)
-        start_dt = req_dt - pd.Timedelta(days=60)
+        start_60 = req_dt - pd.Timedelta(days=60)
+        start_30 = req_dt - pd.Timedelta(days=30)
 
-        var_debits = [
-            e.amount for e in events 
-            if e.status == 'settled' and e.direction == 'debit' and e.category in self.LIVING_EXPENSE_CATEGORIES 
-            and start_dt <= pd.to_datetime(e.event_date) < req_dt
-        ]
-        if not var_debits:
-            return 0.0
-        return sum(var_debits) / 60.0
+        debits_60 = []
+        debits_30 = []
+        for e in events:
+            if (e.status == 'settled' and e.direction == 'debit' and 
+                e.category in self.LIVING_EXPENSE_CATEGORIES):
+                dt = pd.to_datetime(e.event_date)
+                desc_lower = e.description.lower()
+                if 'bulk' in desc_lower and 'purchase' in desc_lower:
+                    continue
+                if start_60 <= dt < req_dt:
+                    debits_60.append(e.amount)
+                if start_30 <= dt < req_dt:
+                    debits_30.append(e.amount)
+
+        burn_60 = sum(debits_60) / 60.0 if debits_60 else 0.0
+        burn_30 = sum(debits_30) / 30.0 if debits_30 else 0.0
+        return burn_60 if burn_60 > 0 else burn_30
 
     def get_salary_info(self, user_id: str, events: List[FinancialEvent], request_date: str) -> Tuple[Optional[float], Optional[int], Optional[str]]:
         """
@@ -322,7 +338,7 @@ class EventNormalizer:
 
         settled_regular_salaries = []
         for e in events:
-            if e.status == 'settled' and (e.category == 'salary' or e.event_type == 'income'):
+            if e.status == 'settled' and (e.category == 'salary' or e.event_type == 'income') and e.amount > 0:
                 desc_lower = e.description.lower()
                 is_gig = any(k in desc_lower for k in self.GIG_KEYWORDS)
                 is_regular = any(k in desc_lower for k in self.REGULAR_SALARY_KEYWORDS) or (e.category == 'salary' and not is_gig)
@@ -343,7 +359,12 @@ class EventNormalizer:
                 return None, None, None
 
             if base_amt is None:
-                base_amt = sorted_salaries[-1].amount
+                amt_counts = Counter(s.amount for s in settled_regular_salaries)
+                most_freq_amt, freq = amt_counts.most_common(1)[0]
+                if freq >= 2:
+                    base_amt = most_freq_amt
+                else:
+                    base_amt = sorted_salaries[-1].amount
 
             # Find most common day of month for salary
             sal_days = [pd.to_datetime(s.event_date).day for s in settled_regular_salaries]

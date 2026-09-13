@@ -166,11 +166,10 @@ class DataLoader:
             # Amount resolution from receipt/invoice image when blank
             amt = r.get('amount')
             if pd.isna(amt):
-                if self.image_processor:
-                    resolved = self.image_processor.get_amount_for_event(ev_id)
-                    amt = resolved if resolved is not None else 0.0
-                else:
-                    amt = 0.0
+                if not self.image_processor:
+                    self.load_images()
+                resolved = self.image_processor.get_amount_for_event(ev_id) if self.image_processor else None
+                amt = resolved if resolved is not None else 0.0
             else:
                 amt = float(amt)
 

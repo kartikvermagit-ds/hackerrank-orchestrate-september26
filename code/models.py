@@ -54,6 +54,11 @@ class NormalizedEvent:
     is_pending_debit: bool
     superseded_by: Optional[str] = None
 
+    @property
+    def amount(self) -> float:
+        """Alias to normalized_amount for compatibility."""
+        return self.normalized_amount
+
 @dataclass
 class PaymentOption:
     payment_option_id: str

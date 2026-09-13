@@ -7,7 +7,7 @@
 
 ### 1. Run Executive Summary
 
-This report documents the final full-dataset execution that generated the root-level [`output.csv`](../../output.csv) across all 250 evaluation requests (`request_26` through `request_275`) from [`dataset/requests.csv`](../../dataset/requests.csv).
+This report documents the final full-dataset execution that generated the root-level [`output.csv`](../output.csv) across all 250 evaluation requests (`request_26` through `request_275`) from [`dataset/requests.csv`](../dataset/requests.csv).
 
 The decision pipeline operates on a hybrid architecture where core financial calculations, multi-currency conversions, 90-day cash flow simulations, safety checks, candidate plan ranking, and decision explanation generation are performed deterministically. All 250 evaluation requests were processed and validated with 100% deterministic precision, requiring 0 external model calls and incurring $0.00 in cloud API costs.
 

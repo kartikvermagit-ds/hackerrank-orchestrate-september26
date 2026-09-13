@@ -20,6 +20,7 @@ class FinancialState:
     stoppable_categories: Set[str]
     allowed_payment_methods: Set[str]
     max_installment_months: Optional[float]
+    daily_uncommitted_burn: float = 0.0
     flexible_events: List[Dict] = None
 
     def __post_init__(self):

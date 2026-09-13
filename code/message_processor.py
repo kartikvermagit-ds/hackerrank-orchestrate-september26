@@ -63,7 +63,7 @@ class MessageProcessor:
                 r'(?:naik menjadi|adalah|temporary monthly pay is|reduced to|increased to|first salary will be|Regular salary of)\s*([A-Z]{3})\s*([0-9]+(?:[\.,][0-9]+)?)',
                 text, re.IGNORECASE
             )
-            if amt_match:
+            if amt_match and not update.unconfirmed_bonus:
                 curr = amt_match.group(1).upper()
                 amt_str = amt_match.group(2).replace(',', '')
                 try:
